@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="関節とバネの生き物が、遺伝的アルゴリズム（GA）と Successive Halving で歩き方を覚えていくシミュレーター">
+<style>body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>進化する生き物</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=BIZ+UDPGothic:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* 観察ノート：方眼の飼育ケース（キャンバス）を主役に、下に記録（グラフ）と実験条件を並べる */
+:root {
+  --paper: #eef2ee;
+  --surface: #fafcf9;
+  --grid: #dbe3dc;
+  --ink: #1b2521;
+  --muted: #56645e;
+  --line: #c9d3cc;
+  --ga: #3346b8;
+  --sh: #a86a12;
+  --hot: #c2412d;
+  --ok: #2d7a55;
+  --shadow: 0 6px 24px rgba(20, 40, 30, .10);
+  --f-disp: "DotGothic16", "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  --f-body: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  --f-num: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #111714; --surface: #172019; --grid: #222d27; --ink: #e2ebe5; --muted: #93a39b; --line: #2c3831;
+    --ga: #6f80e0; --sh: #bf8228; --hot: #f07a62; --ok: #6cc59b; --shadow: 0 6px 24px rgba(0, 0, 0, .45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #111714; --surface: #172019; --grid: #222d27; --ink: #e2ebe5; --muted: #93a39b; --line: #2c3831;
+  --ga: #6f80e0; --sh: #bf8228; --hot: #f07a62; --ok: #6cc59b; --shadow: 0 6px 24px rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--paper); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.7; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--ga); outline-offset: 2px; }
+.num { font-family: var(--f-num); font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+header.top { padding-block: 22px 6px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: flex-end; justify-content: space-between; }
+header h1 { font-family: var(--f-disp); font-weight: 400; font-size: 32px; line-height: 1.15; margin: 0; letter-spacing: .06em; text-wrap: balance; }
+header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.tabs { display: flex; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 4px; }
+.tab { border: 0; background: none; border-radius: 7px; padding: 6px 14px; cursor: pointer; color: var(--muted); font-weight: 700; white-space: nowrap; }
+.tab[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+
+main { padding-block: 14px 64px; display: flex; flex-direction: column; gap: 18px; }
+.case { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+.case canvas { display: block; width: 100%; height: 300px; touch-action: pan-y; }
+@media (max-width: 600px) { .case canvas { height: 230px; } }
+.case .hud { position: absolute; left: 12px; top: 10px; right: 12px; display: flex; justify-content: space-between; gap: 10px; pointer-events: none; font-size: 12px; color: var(--muted); }
+.case .hud b { font-family: var(--f-disp); font-weight: 400; font-size: 22px; color: var(--ink); line-height: 1; display: block; }
+.case .hud .r { text-align: right; }
+.case .lane { position: absolute; left: 12px; bottom: 8px; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line); }
+
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { border: 1px solid var(--ink); background: var(--ink); color: var(--paper); border-radius: 8px; padding: 7px 14px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.btn.ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.btn.ghost:hover { border-color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: default; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; background: none; padding: 6px 11px; cursor: pointer; font-size: 13px; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.spacer { flex: 1; }
+.prog { font-size: 13px; color: var(--muted); }
+
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.panel h2 { margin: 0; font-size: 12px; letter-spacing: .14em; color: var(--muted); font-weight: 700; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.panel h2 span { letter-spacing: 0; font-weight: 400; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.legend i.dash { background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px) !important; height: 2px; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--paper); font-size: 12px; border-radius: 6px; padding: 5px 9px; white-space: nowrap; transform: translate(-50%, -110%); z-index: 3; }
+.tip .num { font-size: 12px; }
+
+.f { display: grid; grid-template-columns: 8.5em minmax(0, 1fr) 3.6em; gap: 10px; align-items: center; font-size: 13px; }
+.f input[type=range] { width: 100%; accent-color: var(--ink); }
+.f output { font-family: var(--f-num); text-align: right; }
+.f select { grid-column: 2 / 4; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 8px; }
+.note { font-size: 12px; color: var(--muted); margin: 0; }
+.favs { display: flex; flex-direction: column; gap: 6px; }
+.fav { display: flex; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.fav .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mini { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.mini.armed { background: var(--hot); color: var(--surface); border-color: var(--hot); }
+
+.vs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 700px) { .vs { grid-template-columns: minmax(0, 1fr); } }
+.vs .case canvas { height: 200px; }
+.score { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 520px) { .score { grid-template-columns: minmax(0, 1fr); } }
+.score div { border-top: 3px solid var(--line); padding-top: 6px; font-size: 12px; color: var(--muted); }
+.score div.ga { border-color: var(--ga); } .score div.sh { border-color: var(--sh); }
+.score b { display: block; font-family: var(--f-disp); font-weight: 400; font-size: 24px; color: var(--ink); line-height: 1.2; }
+
+
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.doc { max-width: 720px; display: flex; flex-direction: column; gap: 14px; }
+.doc h2 { font-family: var(--f-disp); font-weight: 400; font-size: 22px; margin: 6px 0 0; letter-spacing: .04em; }
+.doc p { margin: 0; }
+.doc ol { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 4px; }
+.doc .box { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+.rungs { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.rung { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: 10px; align-items: center; }
+.rung .dots { display: flex; flex-wrap: wrap; gap: 3px; }
+.rung .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--sh); }
+.rung .dots i.out { background: transparent; border: 1px solid var(--line); }
+.caution { border-left: 3px solid var(--hot); padding: 4px 0 4px 12px; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<header class="wrap top">
+  <div>
+    <h1>進化する生き物</h1>
+    <p>選んで、少し変えて、また選ぶ。それだけで歩き方を覚えていく</p>
+  </div>
+  <div class="tabs" role="tablist" aria-label="表示の切り替え">
+    <button class="tab" role="tab" id="t-evo" data-tab="evo" aria-selected="true">進化を見る</button>
+    <button class="tab" role="tab" id="t-vs" data-tab="vs" aria-selected="false">GAとSHを比べる</button>
+    <button class="tab" role="tab" id="t-how" data-tab="how" aria-selected="false">しくみ</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- 進化を見る -->
+  <section id="v-evo" class="stack">
+    <div class="case">
+      <canvas id="cv" aria-label="生き物たちが地面の上を動くようす"></canvas>
+      <div class="hud"><div>世代<b id="h-gen" class="num">0</b></div><div class="r">この世代の最高<b id="h-best" class="num">—</b></div></div>
+      <div class="lane" id="h-time">0.0 / 15秒</div>
+    </div>
+    <div class="bar">
+      <button class="btn" id="b-play" aria-pressed="true">一時停止</button>
+      <div class="seg" role="group" aria-label="再生の速さ"><button data-speed="1" aria-pressed="false">1倍</button><button data-speed="3" aria-pressed="true">3倍</button><button data-speed="8" aria-pressed="false">8倍</button></div>
+      <div class="seg" role="group" aria-label="表示"><button data-show="all" aria-pressed="true">みんな</button><button data-show="best" aria-pressed="false">ベストだけ</button></div>
+      <span class="spacer"></span>
+      <button class="btn ghost" data-ff="10">早送り +10世代</button>
+      <button class="btn ghost" data-ff="50">+50世代</button>
+      <span class="prog" id="ff-prog" aria-live="polite"></span>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h2>世代ごとの距離 <span id="g-sum" class="num"></span></h2>
+        <div class="legend" id="g-leg"></div>
+        <div class="chart" id="chart"></div>
+        <p class="note" id="g-note">横軸は世代、縦軸は15秒で右へ進んだ距離（m）。</p>
+      </div>
+      <div class="panel">
+        <h2>実験の条件</h2>
+        <div class="f"><span>進化のしかた</span><select id="s-algo"><option value="ga">GA（全員15秒走る）</option><option value="sh">SH（予選で半分ずつ落とす）</option></select></div>
+        <div class="f"><span>体の形</span><select id="s-body"></select></div>
+        <div class="f"><span>地面</span><select id="s-ground"></select></div>
+        <div class="f"><label for="s-pop">集団の大きさ</label><input type="range" id="s-pop" min="20" max="200" step="10" value="100"><output id="o-pop">100</output></div>
+        <div class="f"><label for="s-k">親にする数</label><input type="range" id="s-k" min="2" max="30" step="1" value="10"><output id="o-k">10</output></div>
+        <div class="f"><label for="s-sig">変異の大きさ</label><input type="range" id="s-sig" min="0.02" max="0.3" step="0.01" value="0.08"><output id="o-sig">0.08</output></div>
+        <div class="bar"><button class="btn" id="b-reset">この条件で最初から</button><span class="note" id="reset-note"></span></div>
+        <p class="note">親は変えずに次の世代へ残し（エリート）、子は親を少しだけ変えて作ります。交叉はしません。</p>
+        <h2 style="margin-top:6px">お気に入り</h2>
+        <div class="bar"><button class="btn ghost" id="b-fav">いまのベストを保存</button></div>
+        <div class="favs" id="favs"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- GA と SH -->
+  <section id="v-vs" class="stack" hidden>
+    <p class="note" style="font-size:14px;max-width:70ch">同じ計算量（生き物を動かした時間の合計）で、GA と SH のどちらが遠くまで行けるかを比べます。条件は「進化を見る」と同じ体・地面・集団の大きさを使います。SH は落とした個体もこっそり最後まで走らせて、本当は強かったのに予選で落とした数（取りこぼし）も数えます。</p>
+    <div class="vs">
+      <div class="case"><canvas id="cv-ga" aria-label="GAのベスト"></canvas><div class="hud"><div>GA・世代<b id="vg-gen" class="num">0</b></div><div class="r">ベスト<b id="vg-best" class="num">—</b></div></div><div class="lane" style="color:var(--ga)">GA</div></div>
+      <div class="case"><canvas id="cv-sh" aria-label="SHのベスト"></canvas><div class="hud"><div>SH・世代<b id="vs-gen" class="num">0</b></div><div class="r">ベスト<b id="vs-best" class="num">—</b></div></div><div class="lane" style="color:var(--sh)">SH</div></div>
+    </div>
+    <div class="bar">
+      <button class="btn" id="b-vs">比べはじめる</button>
+      <button class="btn ghost" id="b-vs-reset">リセット</button>
+      <span class="prog" id="vs-prog" aria-live="polite"></span>
+    </div>
+    <div class="score" id="vs-score"></div>
+    <div class="panel">
+      <h2>計算量と最高距離 <span class="num" id="vs-sum"></span></h2>
+      <div class="legend" id="vs-leg"></div>
+      <div class="chart" id="chart-vs"></div>
+      <p class="note">横軸は計算量（生き物1匹を1秒動かす＝1。単位は千）、縦軸はそれまでの最高距離（m）。</p>
+    </div>
+  </section>
+
+  <!-- しくみ -->
+  <section id="v-how" hidden>
+    <div class="doc">
+      <h2>生き物の体</h2>
+      <p>体は「点（関節）」と「バネ（筋肉）」でできています。筋肉はそれぞれのリズムで伸び縮みし、点は地面をつかむ強さがちがいます（黒いほどよくつかむ足、白いほどすべる足）。この「伸び縮みの強さ・タイミング・つかむ強さ・リズムの速さ」が遺伝子です。</p>
+      <p>1匹ずつ15秒、地面の上で動かして、<b>右へ進んだ距離</b>を点数にします。</p>
+      <h2>GA（遺伝的アルゴリズム）</h2>
+      <ol>
+        <li>集団（例：100匹）を全員15秒動かして、距離を測る</li>
+        <li>上位の何匹か（例：10匹）を親にする。親はそのまま次の世代に残す（エリート）</li>
+        <li>残りの90匹は、親のどれかをコピーして、遺伝子を少しだけランダムに変えた子にする（突然変異）</li>
+        <li>1〜3をくり返す</li>
+      </ol>
+      <p>最初はジタバタするだけでも、「たまたま少し前に進めた個体」が選ばれ続けるので、世代を重ねると歩いたり跳ねたりするようになります。</p>
+      <h2>SH（Successive Halving）</h2>
+      <p>子を全員15秒動かすのは時間がかかります。SH では、短い予選で下位半分を落とし、残りだけ続きを走らせます。</p>
+      <div class="box rungs" id="rungs"></div>
+      <p>同じ計算量で約3倍の世代を進められます。そのかわり、「出だしは遅いけど後半に伸びる個体」を予選で落とすことがあります（取りこぼし）。「GAとSHを比べる」で、その両方を数字で見られます。</p>
+      <p class="caution">このアプリは、卒業研究の考え方（突然変異だけの GA・エリート保存・Successive Halving）を使った遊びです。卒業研究の実験コードやデータは使っておらず、このアプリの結果は卒業研究の結果ではありません。</p>
+    </div>
+  </section>
+</main>
+
+<script>
+// ---------- 体と地面 ----------
+const BODIES = {
+  frog: { name: 'カエル（4点）', pts: [[0, 0], [0.8, 0], [0.75, 0.5], [0.05, 0.5]], edges: [[0, 1], [1, 2], [2, 3], [3, 0], [0, 2], [1, 3]] },
+  tri: { name: 'サンカク（3点）', pts: [[0, 0], [0.7, 0], [0.35, 0.55]], edges: [[0, 1], [1, 2], [2, 0]] },
+  worm: { name: 'イモムシ（5点）', pts: [[0, 0], [0.5, 0], [1.0, 0], [0.25, 0.4], [0.75, 0.4]], edges: [[0, 1], [1, 2], [3, 4], [0, 3], [3, 1], [1, 4], [4, 2]] },
+  six: { name: 'ムカデ（6点）', pts: [[0, 0], [0.5, 0], [1.0, 0], [0, 0.45], [0.5, 0.45], [1.0, 0.45]], edges: [[0, 1], [1, 2], [3, 4], [4, 5], [0, 3], [1, 4], [2, 5], [0, 4], [4, 2], [3, 1], [1, 5]] },
+};
+const GROUNDS = {
+  flat: { name: '平ら', h: x => 0 },
+  bumpy: { name: 'でこぼこ', h: x => x < 0.6 ? 0 : 0.07 * Math.sin(2.3 * x) + 0.05 * Math.sin(5.9 * x + 1) - 0.07 * Math.sin(1.38) - 0.05 * Math.sin(4.54) },
+  slope: { name: 'のぼり坂', h: x => x < 0.5 ? 0 : (x - 0.5) * 0.12 },
+  stairs: { name: '階段', h: x => x < 1.2 ? 0 : Math.floor((x - 1.2) / 1.1 + 1) * 0.09 },
+};
+
+// ---------- 乱数 ----------
+function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function gauss(r) { let u = 0; while (!u) u = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r()); }
+
+// ---------- 遺伝子 ----------
+const RANGE = { T: [0.8, 2.0], fr: [0, 1], a: [0, 0.25], b: [0.85, 1.15] };
+const TAU = Math.PI * 2;
+function randGenome(body, r) {
+  const L = (k) => RANGE[k][0] + r() * (RANGE[k][1] - RANGE[k][0]);
+  return { T: L('T'), fr: body.pts.map(() => L('fr')), mus: body.edges.map(() => ({ a: L('a'), p: r() * TAU, b: L('b') })) };
+}
+function mutate(g, r, sig) {
+  const m = (v, k) => { const [lo, hi] = RANGE[k]; return Math.min(hi, Math.max(lo, v + gauss(r) * sig * (hi - lo))); };
+  return {
+    T: m(g.T, 'T'),
+    fr: g.fr.map(v => m(v, 'fr')),
+    mus: g.mus.map(u => ({ a: m(u.a, 'a'), p: ((u.p + gauss(r) * sig * TAU) % TAU + TAU) % TAU, b: m(u.b, 'b') })),
+  };
+}
+
+// ---------- 物理（ベルレ積分＋バネの拘束） ----------
+const VMAX = 6, DT = 1 / 120, G = -9.8, ITER = 4, STIFF = 0.5, LIFE = 15;
+function makeSim(body, g, ground) {
+  const n = body.pts.length;
+  const X = new Float64Array(n), Y = new Float64Array(n), PX = new Float64Array(n), PY = new Float64Array(n);
+  const minY = Math.min(...body.pts.map(p => p[1]));
+  for (let i = 0; i < n; i++) { X[i] = PX[i] = body.pts[i][0] - 0.4; Y[i] = PY[i] = body.pts[i][1] - minY + 0.02; }
+  const L0 = body.edges.map(([i, j]) => Math.hypot(X[i] - X[j], Y[i] - Y[j]));
+  let x0 = 0; for (let i = 0; i < n; i++) x0 += X[i]; x0 /= n;
+  return { body, g, h: ground.h, n, X, Y, PX, PY, L0, x0, t: 0, dead: false };
+}
+function stepSim(s) {
+  const { X, Y, PX, PY, n, g, h } = s;
+  const fr = g.fr;
+  for (let i = 0; i < n; i++) {
+    let vx = (X[i] - PX[i]) * 0.99, vy = (Y[i] - PY[i]) * 0.99;
+    const sp = Math.hypot(vx, vy), cap = VMAX * DT;
+    if (sp > cap) { vx *= cap / sp; vy *= cap / sp; }
+    PX[i] = X[i]; PY[i] = Y[i];
+    X[i] += vx; Y[i] += vy + G * DT * DT;
+    const gy = h(X[i]);
+    if (Y[i] < gy) { Y[i] = gy; PY[i] = gy; const f = 0.05 + 0.9 * fr[i]; X[i] = PX[i] + (X[i] - PX[i]) * (1 - f); }
+  }
+  const w = TAU / g.T, edges = s.body.edges;
+  for (let it = 0; it < ITER; it++) {
+    for (let e = 0; e < edges.length; e++) {
+      const i = edges[e][0], j = edges[e][1], u = g.mus[e];
+      const L = s.L0[e] * u.b * (1 + u.a * Math.sin(w * s.t + u.p));
+      const dx = X[j] - X[i], dy = Y[j] - Y[i], d = Math.hypot(dx, dy) || 1e-6;
+      const k = (d - L) / d * 0.5 * STIFF;
+      X[i] += dx * k; Y[i] += dy * k; X[j] -= dx * k; Y[j] -= dy * k;
+    }
+    // 地面は動かない壁：筋肉が足を地面に押し込んだら、その場で止める
+    for (let i = 0; i < n; i++) { const gy = h(X[i]); if (Y[i] < gy) Y[i] = gy; }
+  }
+  // 地面に触れている足は、つかむ強さに応じて横すべりを止める（押し込んだ分ははね返さない）
+  for (let i = 0; i < n; i++) {
+    const gy = h(X[i]);
+    if (Y[i] <= gy + 1e-4) { Y[i] = Math.max(Y[i], gy); PY[i] = Y[i]; const f = 0.05 + 0.9 * fr[i]; X[i] = PX[i] + (X[i] - PX[i]) * (1 - f); }
+  }
+  s.t += DT;
+}
+function advance(s, T) { while (s.t < T - 1e-9) stepSim(s); }
+function dist(s) { let m = 0; for (let i = 0; i < s.n; i++) m += s.X[i]; m = m / s.n - s.x0; return Number.isFinite(m) ? m : -99; }
+
+// ---------- 進化の1世代 ----------
+// run: { algo, body, ground, P, K, sig, r, gen, pop:[{g, score, elimAt}], hist:[], spent, check }
+function newRun(o) {
+  const r = rng(o.seed || (Math.random() * 1e9) | 0);
+  return { ...o, r, gen: 0, pop: null, hist: [], spent: 0 };
+}
+function evalFull(run, kids) {
+  for (const k of kids) { const s = makeSim(run.body, k.g, run.ground); advance(s, LIFE); k.score = dist(s); k.elimAt = null; run.spent += LIFE; }
+}
+// 予選：1.875秒 → 3.75秒 → 7.5秒 → 15秒。各段で下位半分を落とす（続きから走らせる）
+const RUNGS = [LIFE / 8, LIFE / 4, LIFE / 2, LIFE];
+function evalSH(run, kids) {
+  let alive = kids.map(k => ({ k, s: makeSim(run.body, k.g, run.ground) }));
+  let prevT = 0;
+  const out = [];
+  RUNGS.forEach((T, ri) => {
+    for (const a of alive) { advance(a.s, T); a.k.score = dist(a.s); }
+    run.spent += alive.length * (T - prevT); prevT = T;
+    if (ri < RUNGS.length - 1) {
+      alive.sort((a, b) => b.k.score - a.k.score);
+      const keep = Math.max(1, Math.ceil(alive.length / 2));
+      for (const a of alive.slice(keep)) { a.k.elimAt = T; out.push(a); }
+      alive = alive.slice(0, keep);
+    } else for (const a of alive) a.k.elimAt = null;
+  });
+  // 取りこぼしを数える（計算量には入れない）
+  if (run.check) {
+    for (const a of out) { advance(a.s, LIFE); a.k.trueScore = dist(a.s); }
+    for (const k of kids) if (k.elimAt === null) k.trueScore = k.score;
+    const top = [...kids].sort((a, b) => b.trueScore - a.trueScore).slice(0, run.K);
+    return top.filter(k => k.elimAt !== null).length;
+  }
+  return null;
+}
+function stepGen(run) {
+  let kids, elites = [];
+  if (!run.pop) kids = Array.from({ length: run.P }, () => ({ g: randGenome(run.body, run.r) }));
+  else {
+    elites = run.pop.filter(x => x.elimAt === null).slice(0, run.K).map(x => ({ g: x.g, score: x.score, elimAt: null, elite: true }));
+    kids = Array.from({ length: run.P - elites.length }, () => ({ g: mutate(elites[(run.r() * elites.length) | 0].g, run.r, run.sig) }));
+  }
+  let miss = null;
+  if (run.algo === 'sh') miss = evalSH(run, kids); else evalFull(run, kids);
+  const pop = [...elites, ...kids];
+  pop.sort((a, b) => (a.elimAt === null ? 0 : 1) - (b.elimAt === null ? 0 : 1) || b.score - a.score);
+  run.pop = pop; run.gen++;
+  const fin = pop.filter(x => x.elimAt === null);
+  const best = fin[0].score, avg = fin.reduce((t, x) => t + x.score, 0) / fin.length;
+  const prevBest = run.hist.length ? run.hist[run.hist.length - 1].top : -Infinity;
+  run.hist.push({ gen: run.gen, best, avg, top: Math.max(prevBest, best), spent: run.spent, miss });
+  return run;
+}
+
+// ---------- 描画 ----------
+const css = () => { const s = getComputedStyle(document.documentElement); const v = k => s.getPropertyValue(k).trim(); return { paper: v('--paper'), surface: v('--surface'), grid: v('--grid'), ink: v('--ink'), muted: v('--muted'), line: v('--line'), ga: v('--ga'), sh: v('--sh'), hot: v('--hot') }; };
+function fit(cv) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); return { c, w, h };
+}
+// cam: 画面の中心に来る x（m）。scale: 1m の画素数
+function drawWorld(cv, cam, sims, opt) {
+  const { c, w, h } = fit(cv), C = opt.colors;
+  const scale = Math.max(70, Math.min(130, w / 6.5)), gy = h * 0.74;
+  const sx = x => w / 2 + (x - cam) * scale, sy = y => gy - y * scale;
+  c.fillStyle = C.surface; c.fillRect(0, 0, w, h);
+  // 方眼
+  c.strokeStyle = C.grid; c.lineWidth = 1;
+  const step = scale / 4, off = ((-cam * scale + w / 2) % step + step) % step;
+  c.beginPath();
+  for (let x = off; x < w; x += step) { c.moveTo(x + .5, 0); c.lineTo(x + .5, h); }
+  for (let y = gy % step; y < h; y += step) { c.moveTo(0, y + .5); c.lineTo(w, y + .5); }
+  c.stroke();
+  // 地面
+  const H = opt.ground.h, x0 = cam - w / 2 / scale, x1 = cam + w / 2 / scale;
+  c.beginPath(); c.moveTo(0, h);
+  for (let px = 0; px <= w; px += 3) { const x = x0 + px / scale; c.lineTo(px, sy(H(x))); }
+  c.lineTo(w, h); c.closePath(); c.fillStyle = C.paper; c.fill();
+  c.beginPath();
+  for (let px = 0; px <= w; px += 3) { const x = x0 + px / scale; px ? c.lineTo(px, sy(H(x))) : c.moveTo(px, sy(H(x))); }
+  c.strokeStyle = C.ink; c.lineWidth = 2; c.stroke();
+  // 距離の目盛り
+  c.fillStyle = C.muted; c.font = '11px "JetBrains Mono", monospace'; c.textAlign = 'center';
+  for (let m = Math.ceil(x0); m <= x1; m++) {
+    const px = sx(m), py = sy(H(m));
+    c.fillRect(px - .5, py, 1, m === 0 ? 14 : 7);
+    c.fillText(m === 0 ? 'スタート' : m + 'm', px, py + 24);
+  }
+  // 生き物（後ろから描いて、先頭をいちばん上に）
+  for (let k = sims.length - 1; k >= 0; k--) {
+    const it = sims[k], s = it.s;
+    if (it.hide) continue;
+    const lead = k === 0;
+    c.globalAlpha = it.alpha ?? 1;
+    const w2 = TAU / s.g.T;
+    s.body.edges.forEach(([i, j], e) => {
+      const u = s.g.mus[e], ph = Math.sin(w2 * s.t + u.p);
+      c.strokeStyle = lead ? (ph < 0 ? C.hot : C.ink) : (it.color || C.ink);
+      c.lineWidth = lead ? (ph < 0 ? 3.5 : 2) : 1.5;
+      c.beginPath(); c.moveTo(sx(s.X[i]), sy(s.Y[i])); c.lineTo(sx(s.X[j]), sy(s.Y[j])); c.stroke();
+    });
+    const r = lead ? 6 : 4;
+    for (let i = 0; i < s.n; i++) {
+      c.beginPath(); c.arc(sx(s.X[i]), sy(s.Y[i]), r, 0, TAU);
+      c.fillStyle = C.surface; c.fill();
+      c.globalAlpha = (it.alpha ?? 1) * (0.15 + 0.85 * s.g.fr[i]);
+      c.fillStyle = lead ? C.ink : (it.color || C.ink); c.fill();
+      c.globalAlpha = it.alpha ?? 1;
+      c.strokeStyle = lead ? C.ink : (it.color || C.ink); c.lineWidth = lead ? 1.5 : 1; c.stroke();
+    }
+    c.globalAlpha = 1;
+  }
+  if (opt.label) { c.fillStyle = C.muted; c.font = '12px "BIZ UDPGothic", sans-serif'; c.textAlign = 'left'; c.fillText(opt.label, 12, h - 12); }
+}
+
+// ---------- グラフ（SVG、ホバーで値） ----------
+function niceTicks(lo, hi, n, int) {
+  const span = hi - lo || 1, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const st = Math.max(int ? 1 : 0, [1, 2, 2.5, 5, 10].filter(m => !int || m !== 2.5).map(m => m * mag).find(m => span / m <= n) || 10 * mag);
+  const out = []; for (let v = Math.ceil(lo / st) * st; v <= hi + 1e-9; v += st) out.push(+v.toFixed(6));
+  return out;
+}
+function lineChart(el, series, o) {
+  const W = Math.max(300, Math.round(el.clientWidth || 560)), H = W < 420 ? 200 : 240, ml = 40, mr = 56, mt = 12, mb = 28;
+  const pts = series.flatMap(s => s.pts);
+  if (!pts.length) { el.innerHTML = `<p class="note" style="padding:30px 0;text-align:center">${o.empty}</p>`; return; }
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const xmin = o.x0 ?? Math.min(...xs), xmax = Math.max(...xs, xmin + 1);
+  const ymin = Math.min(0, ...ys), ymax = Math.max(0.5, ...ys) * 1.08;
+  const X = v => ml + (v - xmin) / (xmax - xmin) * (W - ml - mr), Y = v => mt + (1 - (v - ymin) / (ymax - ymin)) * (H - mt - mb);
+  const yt = niceTicks(ymin, ymax, 4), xt = niceTicks(xmin, xmax, W < 420 ? 4 : 5, o.int);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${o.aria}">`;
+  svg += yt.map(v => `<line x1="${ml}" x2="${W - mr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${ml - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="JetBrains Mono, monospace">${o.yf(v)}</text>`).join('');
+  svg += xt.map(v => `<text x="${X(v)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="JetBrains Mono, monospace">${o.xf(v)}</text>`).join('');
+  svg += `<line x1="${ml}" x2="${W - mr}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--line)" stroke-width="1"/>`;
+  for (const s of series) {
+    if (!s.pts.length) continue;
+    const d = s.pts.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join('');
+    if (s.area) svg += `<path d="${d}L${X(s.pts[s.pts.length - 1][0]).toFixed(1)},${Y(Math.max(0, ymin))}L${X(s.pts[0][0]).toFixed(1)},${Y(Math.max(0, ymin))}Z" fill="${s.color}" fill-opacity=".10"/>`;
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${s.dash ? ' stroke-dasharray="4 3"' : ''}/>`;
+    const last = s.pts[s.pts.length - 1];
+    svg += `<circle cx="${X(last[0])}" cy="${Y(last[1])}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`;
+    if (s.label) svg += `<text x="${X(last[0]) + 8}" y="${Y(last[1]) + 4}" font-size="11" fill="var(--ink)" font-family="JetBrains Mono, monospace">${s.label}</text>`;
+  }
+  svg += `<line id="xh" x1="0" x2="0" y1="${mt}" y2="${H - mb}" stroke="var(--muted)" stroke-width="1" visibility="hidden"/>`;
+  svg += `<rect x="${ml}" y="${mt}" width="${W - ml - mr}" height="${H - mt - mb}" fill="transparent" data-hit="1"/></svg><div class="tip" hidden></div>`;
+  el.innerHTML = svg;
+  const sv = el.querySelector('svg'), tip = el.querySelector('.tip'), xh = el.querySelector('#xh');
+  const hide = () => { tip.hidden = true; xh.setAttribute('visibility', 'hidden'); };
+  sv.addEventListener('pointerleave', hide);
+  sv.addEventListener('pointermove', e => {
+    const b = sv.getBoundingClientRect(), vx = (e.clientX - b.left) / b.width * W;
+    if (vx < ml || vx > W - mr) { hide(); return; }
+    const xv = xmin + (vx - ml) / (W - ml - mr) * (xmax - xmin);
+    const rows = series.filter(s => s.pts.length).map(s => { let best = s.pts[0]; for (const p of s.pts) if (Math.abs(p[0] - xv) < Math.abs(best[0] - xv)) best = p; return { s, p: best }; });
+    const px = X(rows[0].p[0]);
+    xh.setAttribute('x1', px); xh.setAttribute('x2', px); xh.setAttribute('visibility', 'visible');
+    tip.innerHTML = `${o.xf(rows[0].p[0], true)}<br>` + rows.map(r => `<span style="color:${r.s.color === 'var(--ink)' ? 'inherit' : 'inherit'}">${r.s.name}</span> <span class="num">${o.yf(r.p[1], true)}</span>`).join('<br>');
+    tip.style.left = (px / W * b.width) + 'px'; tip.style.top = (Math.min(...rows.map(r => Y(r.p[1]))) / H * b.height) + 'px'; tip.hidden = false;
+  });
+}
+
+// ---------- 画面：進化を見る ----------
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const fmtM = v => (v >= 0 ? '' : '−') + Math.abs(v).toFixed(2) + 'm';
+const E = { run: null, sims: [], playing: true, speed: 3, show: 'all', cam: 0, busy: false, raf: 0 };
+function settings() {
+  return { algo: $('#s-algo').value, bodyKey: $('#s-body').value, groundKey: $('#s-ground').value, P: +$('#s-pop').value, K: Math.min(+$('#s-k').value, +$('#s-pop').value - 1), sig: +$('#s-sig').value };
+}
+function mkRun(o, extra) { return newRun({ algo: o.algo, body: BODIES[o.bodyKey], ground: GROUNDS[o.groundKey], P: o.P, K: o.K, sig: o.sig, bodyKey: o.bodyKey, groundKey: o.groundKey, ...extra }); }
+function startReplay() {
+  const run = E.run;
+  E.sims = run.pop.map((x, i) => ({ s: makeSim(run.body, x.g, run.ground), elimAt: x.elimAt, alpha: i === 0 ? 1 : 0.16 }));
+  E.cam = 0.6;
+  $('#h-gen').textContent = run.gen;
+  $('#h-best').textContent = fmtM(run.pop[0].score);
+  renderChart();
+}
+function resetEvo() {
+  E.run = mkRun(settings());
+  stepGen(E.run);
+  startReplay();
+  $('#reset-note').textContent = '';
+  saveConf();
+}
+function renderChart() {
+  const run = E.run, h = run.hist;
+  const isSH = run.algo === 'sh';
+  $('#g-leg').innerHTML = `<span><i style="background:var(--ink)"></i>最高</span><span><i class="dash" style="color:var(--muted)"></i>平均${isSH ? '（最後まで走った個体）' : ''}</span>`;
+  lineChart($('#chart'), [
+    { name: '最高', color: 'var(--ink)', area: true, pts: h.map(r => [r.gen, r.best]), label: h.length ? fmtM(h[h.length - 1].best) : '' },
+    { name: '平均', color: 'var(--muted)', dash: true, pts: h.map(r => [r.gen, r.avg]) },
+  ], { x0: 1, int: true, xf: (v, t) => t ? `第${v}世代` : String(v), yf: (v, t) => t ? fmtM(v) : v.toFixed(v % 1 ? 1 : 0), aria: '世代ごとの最高と平均の距離', empty: 'まだ記録がありません' });
+  const top = h.length ? Math.max(...h.map(r => r.best)) : 0;
+  $('#g-sum').textContent = h.length ? `${h.length}世代・これまでの最高 ${fmtM(top)}` : '';
+}
+function loop() {
+  const C = css();
+  if (!E.busy && E.run && document.visibilityState === 'visible' && S.tab === 'evo') {
+    if (E.playing) {
+      const steps = Math.round(E.speed * 2);
+      for (const it of E.sims) {
+        if (it.elimAt !== null && it.s.t >= it.elimAt) { it.gone = (it.gone || 0) + 1; continue; }
+        for (let k = 0; k < steps && it.s.t < LIFE; k++) stepSim(it.s);
+      }
+      if (E.sims[0].s.t >= LIFE - 1e-9) { if (!E.hold) E.hold = performance.now(); if (performance.now() - E.hold > 700) { E.hold = 0; if (E.run._fav) E.sims = [{ ...E.sims[0], s: makeSim(E.run.body, E.sims[0].s.g, E.run.ground) }]; else { stepGen(E.run); startReplay(); } } }
+    }
+    const lead = E.sims[0].s;
+    let lx = 0; for (let i = 0; i < lead.n; i++) lx += lead.X[i]; lx /= lead.n;
+    E.cam += (lx + 0.6 - E.cam) * 0.08;
+    const list = E.sims.map((it, i) => ({ ...it, hide: (E.show === 'best' && i > 0) || (it.gone > 30), alpha: it.elimAt !== null && it.s.t >= it.elimAt ? Math.max(0, 0.16 * (1 - (it.gone || 0) / 30)) : it.alpha, color: it.elimAt !== null && it.s.t >= it.elimAt ? C.sh : null }));
+    drawWorld($('#cv'), E.cam, list, { colors: C, ground: E.run.ground });
+    $('#h-time').textContent = `${Math.min(LIFE, lead.t).toFixed(1)} / ${LIFE}秒${E.run.algo === 'sh' ? '・予選 ' + RUNGS.slice(0, 3).map(t => t.toFixed(1) + '秒').join('・') : ''}`;
+  }
+  if (S.tab === 'vs') drawVs(C);
+  E.raf = requestAnimationFrame(loop);
+}
+async function fastForward(n) {
+  if (E.busy) return;
+  E.busy = true; document.querySelectorAll('[data-ff]').forEach(b => b.disabled = true);
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) {
+    stepGen(E.run);
+    if (performance.now() - t0 > 30 * (i + 1) || i === n - 1) { $('#ff-prog').textContent = `計算中… ${i + 1}/${n}世代`; await new Promise(r => setTimeout(r, 0)); }
+  }
+  $('#ff-prog').textContent = `${n}世代すすめました（${((performance.now() - t0) / 1000).toFixed(1)}秒）`;
+  E.busy = false; document.querySelectorAll('[data-ff]').forEach(b => b.disabled = false);
+  startReplay();
+}
+
+// ---------- お気に入り（このブラウザにだけ保存） ----------
+function favs() { try { return JSON.parse(localStorage.getItem('evo-favs') || '[]'); } catch (e) { return []; } }
+function setFavs(a) { try { localStorage.setItem('evo-favs', JSON.stringify(a)); return true; } catch (e) { return false; } }
+function renderFavs() {
+  const a = favs();
+  $('#favs').innerHTML = a.length ? a.map((f, i) => `<div class="fav"><span class="nm">${BODIES[f.bodyKey].name.replace(/（.*）/, '')}・${GROUNDS[f.groundKey].name}・第${f.gen}世代 <span class="num">${fmtM(f.score)}</span></span><button class="mini" data-favplay="${i}">再生</button><button class="mini" data-favdel="${i}">削除</button></div>`).join('') : '<p class="note">気に入った歩き方を保存すると、あとで見返せます（このブラウザの中にだけ残ります）。</p>';
+}
+function playFav(f) {
+  E.playing = true; syncPlay();
+  E.sims = [{ s: makeSim(BODIES[f.bodyKey], f.g, GROUNDS[f.groundKey]), elimAt: null, alpha: 1 }];
+  E.favView = f; E.cam = 0.6;
+  $('#h-gen').textContent = f.gen; $('#h-best').textContent = fmtM(f.score);
+  E.run = { ...E.run, ground: GROUNDS[f.groundKey], body: BODIES[f.bodyKey], _fav: true, _back: E.run };
+}
+
+// ---------- 画面：GA と SH ----------
+const V = { ga: null, sh: null, on: false, simGa: null, simSh: null, camGa: 0, camSh: 0 };
+function resetVs() {
+  V.on = false; $('#b-vs').textContent = '比べはじめる';
+  const o = settings(), seed = (Math.random() * 1e9) | 0;
+  V.ga = mkRun({ ...o, algo: 'ga' }, { seed });
+  V.sh = mkRun({ ...o, algo: 'sh' }, { seed, check: true });
+  V.simGa = V.simSh = null;
+  renderVs();
+}
+async function vsLoop() {
+  while (V.on) {
+    const t0 = performance.now();
+    for (let k = 0; k < 4 && V.on && (k === 0 || performance.now() - t0 < 40); k++) {
+      const run = V.ga.spent <= V.sh.spent ? V.ga : V.sh;
+      stepGen(run);
+      if (run === V.ga) V.simGa = null; else V.simSh = null;
+    }
+    renderVs();
+    await new Promise(r => setTimeout(r, 30));
+    if (V.ga.spent > 2.5e6) { V.on = false; $('#b-vs').textContent = '比べはじめる'; $('#vs-prog').textContent = '計算量 2,500千 まで来たので止めました'; }
+  }
+}
+function renderVs() {
+  const g = V.ga, s = V.sh;
+  $('#vg-gen').textContent = g.gen; $('#vs-gen').textContent = s.gen;
+  const gb = g.hist.length ? g.hist[g.hist.length - 1].top : null, sb = s.hist.length ? s.hist[s.hist.length - 1].top : null;
+  $('#vg-best').textContent = gb === null ? '—' : fmtM(gb); $('#vs-best').textContent = sb === null ? '—' : fmtM(sb);
+  const miss = s.hist.filter(r => r.miss !== null && r.gen > 1);
+  const avgMiss = miss.length ? miss.reduce((t, r) => t + r.miss, 0) / miss.length : null;
+  $('#vs-score').innerHTML = `
+    <div class="ga">GA の世代数<b class="num">${g.gen}</b>1世代 ${(g.P - g.K) * LIFE / 1000}千</div>
+    <div class="sh">SH の世代数<b class="num">${s.gen}</b>1世代 約${((s.P - s.K) * (RUNGS[0] + RUNGS[0] / 2 + RUNGS[1] / 4 + RUNGS[2] / 8) / 1000).toFixed(1)}千</div>
+    <div class="sh">SH の取りこぼし<b class="num">${avgMiss === null ? '—' : avgMiss.toFixed(1) + '匹'}</b>本当は上位${s.K}匹に入れたのに予選で落とした数（1世代の平均）</div>`;
+  $('#vs-leg').innerHTML = `<span><i style="background:var(--ga)"></i>GA</span><span><i style="background:var(--sh)"></i>SH</span>`;
+  lineChart($('#chart-vs'), [
+    { name: 'GA', color: 'var(--ga)', pts: g.hist.map(r => [r.spent / 1000, r.top]), label: gb === null ? '' : 'GA ' + gb.toFixed(2) },
+    { name: 'SH', color: 'var(--sh)', pts: s.hist.map(r => [r.spent / 1000, r.top]), label: sb === null ? '' : 'SH ' + sb.toFixed(2) },
+  ], { x0: 0, xf: (v, t) => t ? `計算量 ${Math.round(v).toLocaleString()}千` : Math.round(v).toLocaleString(), yf: (v, t) => t ? fmtM(v) : v.toFixed(v % 1 ? 1 : 0), aria: '計算量ごとの GA と SH の最高距離', empty: '「比べはじめる」を押すと、ここに2本の線がのびていきます' });
+  $('#vs-sum').textContent = g.hist.length ? `いまの計算量 ${Math.round(Math.max(g.spent, s.spent) / 1000).toLocaleString()}千` : '';
+}
+function drawVs(C) {
+  for (const [key, cvId, color] of [['ga', '#cv-ga', C.ga], ['sh', '#cv-sh', C.sh]]) {
+    const run = V[key], simKey = key === 'ga' ? 'simGa' : 'simSh', camKey = key === 'ga' ? 'camGa' : 'camSh';
+    if (!run || !run.pop) { drawWorld($(cvId), 0.6, [], { colors: C, ground: GROUNDS[settings().groundKey] }); continue; }
+    if (!V[simKey] || V[simKey].t >= LIFE) { const b = run.pop.find(x => x.elimAt === null); V[simKey] = makeSim(run.body, b.g, run.ground); V[camKey] = 0.6; }
+    const s = V[simKey];
+    for (let k = 0; k < 4; k++) stepSim(s);
+    let lx = 0; for (let i = 0; i < s.n; i++) lx += s.X[i]; lx /= s.n;
+    V[camKey] += (lx + 0.6 - V[camKey]) * 0.08;
+    drawWorld($(cvId), V[camKey], [{ s, alpha: 1 }], { colors: { ...C, hot: color }, ground: run.ground });
+  }
+}
+
+// ---------- しくみの図 ----------
+function renderRungs() {
+  const n = 16, rows = [[RUNGS[0], 16], [RUNGS[1], 8], [RUNGS[2], 4], [RUNGS[3], 2]];
+  $('#rungs').innerHTML = rows.map(([t, k], i) => `<div class="rung"><span class="num">${t.toFixed(t % 1 ? 3 : 0).replace(/0+$/, '').replace(/\.$/, '')}秒まで</span><span class="dots">${Array.from({ length: n }, (_, j) => `<i class="${j < k ? '' : 'out'}"></i>`).join('')}</span></div>`).join('') +
+    '<p class="note">子が16匹なら、1.875秒走らせて8匹に、3.75秒で4匹に、7.5秒で2匹にしぼり、最後の2匹だけ15秒走らせます。</p>';
+}
+
+// ---------- 操作 ----------
+const S = { tab: 'evo' };
+function setTab(t) {
+  S.tab = t;
+  for (const k of ['evo', 'vs', 'how']) { $('#v-' + k).hidden = k !== t; $('#t-' + k).setAttribute('aria-selected', String(k === t)); }
+  if (t === 'vs' && !V.ga) resetVs();
+  try { localStorage.setItem('evo-tab', t); } catch (e) { }
+}
+function syncPlay() { $('#b-play').textContent = E.playing ? '一時停止' : '再生'; $('#b-play').setAttribute('aria-pressed', String(E.playing)); }
+function backFromFav() { if (E.run && E.run._fav) { E.run = E.run._back; startReplay(); } }
+document.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.dataset.tab) setTab(t.dataset.tab);
+  if (t.dataset.speed) { E.speed = +t.dataset.speed; t.parentNode.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === t))); }
+  if (t.dataset.show) { E.show = t.dataset.show; t.parentNode.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === t))); }
+  if (t.dataset.ff) { backFromFav(); fastForward(+t.dataset.ff); }
+  if (t.id === 'b-play') { E.playing = !E.playing; syncPlay(); }
+  if (t.id === 'b-reset') { E.busy = false; resetEvo(); }
+  if (t.id === 'b-fav') {
+    const run = E.run._fav ? E.run._back : E.run, b = run.pop.find(x => x.elimAt === null);
+    const a = favs(); a.unshift({ g: b.g, score: b.score, gen: run.gen, bodyKey: run.bodyKey, groundKey: run.groundKey, at: Date.now() });
+    if (!setFavs(a.slice(0, 20))) $('#reset-note').textContent = 'このブラウザでは保存できませんでした';
+    renderFavs();
+  }
+  if (t.dataset.favplay) playFav(favs()[+t.dataset.favplay]);
+  if (t.dataset.favdel) {
+    if (!t.classList.contains('armed')) { t.classList.add('armed'); t.textContent = 'もう一度'; setTimeout(() => { t.classList.remove('armed'); t.textContent = '削除'; }, 3000); return; }
+    const a = favs(); a.splice(+t.dataset.favdel, 1); setFavs(a); renderFavs();
+  }
+  if (t.id === 'b-vs') { V.on = !V.on; t.textContent = V.on ? '止める' : '比べはじめる'; $('#vs-prog').textContent = ''; if (V.on) vsLoop(); }
+  if (t.id === 'b-vs-reset') resetVs();
+});
+for (const id of ['pop', 'k', 'sig']) $('#s-' + id).addEventListener('input', e => { $('#o-' + id).textContent = e.target.value; $('#reset-note').textContent = '「この条件で最初から」で反映します'; });
+for (const id of ['algo', 'body', 'ground']) $('#s-' + id).addEventListener('change', () => { $('#reset-note').textContent = '「この条件で最初から」で反映します'; });
+function saveConf() { try { localStorage.setItem('evo-conf', JSON.stringify(settings())); } catch (e) { } }
+
+// 初期化
+$('#s-body').innerHTML = Object.entries(BODIES).map(([k, b]) => `<option value="${k}">${b.name}</option>`).join('');
+$('#s-ground').innerHTML = Object.entries(GROUNDS).map(([k, g]) => `<option value="${k}">${g.name}</option>`).join('');
+try {
+  const c = JSON.parse(localStorage.getItem('evo-conf') || 'null');
+  if (c) { $('#s-algo').value = c.algo; if (BODIES[c.bodyKey]) $('#s-body').value = c.bodyKey; if (GROUNDS[c.groundKey]) $('#s-ground').value = c.groundKey; $('#s-pop').value = c.P; $('#s-k').value = c.K; $('#s-sig').value = c.sig; for (const id of ['pop', 'k', 'sig']) $('#o-' + id).textContent = $('#s-' + id).value; }
+} catch (e) { }
+renderRungs(); renderFavs(); resetEvo();
+try { const t = localStorage.getItem('evo-tab'); if (t === 'vs' || t === 'how') setTab(t); } catch (e) { }
+if (location.hash === '#vs' || location.hash === '#how') setTab(location.hash.slice(1));
+E.raf = requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>
