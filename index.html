@@ -8,6 +8,15 @@
 </head>
 <body>
 <title>進化する生き物</title>
+<!-- pwa -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="進化する生き物">
+<meta name="theme-color" content="#2e6b4f">
+<!-- /pwa -->
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -658,5 +667,8 @@ if (location.hash === '#vs' || location.hash === '#how') setTab(location.hash.sl
 E.raf = requestAnimationFrame(loop);
 </script>
 
+<!-- pwa -->
+<script>if ('serviceWorker' in navigator && location.protocol !== 'file:') addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));</script>
+<!-- /pwa -->
 </body>
 </html>
